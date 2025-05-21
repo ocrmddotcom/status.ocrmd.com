@@ -108,6 +108,39 @@ def get_status_color(status):
     else:
         return '#9f9f9f' # Grey (Unknown/Other)
 
+def clean_service_name(service_name, status=None):
+    """Removes status information from service name."""
+    # List of common status terms to remove from service names
+    status_terms = [
+        'healthy', 'operational', 'ok', 'all systems operational', 
+        'degraded performance', 'partial outage', 'major outage',
+        'under maintenance', 'investigating', 'monitoring', 'failed',
+        'unavailable', 'down'
+    ]
+    
+    # If we know the actual status, add it to the list of terms to remove
+    if status:
+        status_terms.append(status.lower())
+    
+    cleaned_name = service_name
+    for term in status_terms:
+        # Try to remove the term from the end of the service name
+        pattern = r'\s*[-:]?\s*' + re.escape(term) + r'$'
+        cleaned_name = re.sub(pattern, '', cleaned_name, flags=re.IGNORECASE)
+        
+        # Also try to remove it with parentheses or brackets
+        cleaned_name = re.sub(r'\s*\([^)]*' + re.escape(term) + r'[^)]*\)', '', cleaned_name, flags=re.IGNORECASE)
+        cleaned_name = re.sub(r'\s*\[[^\]]*' + re.escape(term) + r'[^\]]*\]', '', cleaned_name, flags=re.IGNORECASE)
+    
+    # Trim any trailing special characters and whitespace
+    cleaned_name = re.sub(r'[-:,\s]+$', '', cleaned_name)
+    
+    # Default to "Service" if name becomes empty
+    if not cleaned_name.strip():
+        return "Service"
+    
+    return cleaned_name.strip()
+
 async def scrape_status_page(url, executable_path=None):
     services = {}
     browser = None
@@ -199,15 +232,10 @@ if __name__ == "__main__":
         status_value = args.debug_badge[1]
         print(f"Debug mode: Generating badge for Service='{service_key_original}', Status='{status_value}'")
 
-        cleaned_service_key = service_key_original.strip()
-        service_display_name_for_badge = cleaned_service_key
-        if cleaned_service_key.upper().endswith("OK") and status_value.upper() == "OK":
-            service_display_name_for_badge = cleaned_service_key[:-2].strip()
-        else:
-            service_display_name_for_badge = cleaned_service_key.replace('_', ' ')
-        if not service_display_name_for_badge:
-            service_display_name_for_badge = "Service"
-
+        # Clean the service name to remove any status information
+        service_display_name_for_badge = clean_service_name(service_key_original, status_value)
+        service_display_name_for_badge = service_display_name_for_badge.replace('_', ' ')
+        
         filename_base = sanitize_service_name_for_filename(service_display_name_for_badge)
         badge_filename = os.path.join(output_dir, f"{filename_base}.svg")
         color = get_status_color(status_value)
@@ -242,15 +270,10 @@ if __name__ == "__main__":
                  print(f"Error removing old badge {existing_file}: {e}")
 
     for service_key_original, status_value in services_status.items():
-        cleaned_service_key = service_key_original.strip()
-        service_display_name_for_badge = cleaned_service_key
-        if cleaned_service_key.upper().endswith("OK") and status_value.upper() == "OK":
-            service_display_name_for_badge = cleaned_service_key[:-2].strip()
-        else:
-            service_display_name_for_badge = cleaned_service_key.replace('_', ' ')
-        if not service_display_name_for_badge:
-            service_display_name_for_badge = "Service"
-
+        # Clean the service name to remove any status information
+        service_display_name_for_badge = clean_service_name(service_key_original, status_value)
+        service_display_name_for_badge = service_display_name_for_badge.replace('_', ' ')
+        
         filename_base = sanitize_service_name_for_filename(service_display_name_for_badge)
         badge_filename = os.path.join(output_dir, f"{filename_base}.svg")
         color = get_status_color(status_value)
