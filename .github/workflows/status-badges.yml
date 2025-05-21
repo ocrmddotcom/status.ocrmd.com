@@ -1,0 +1,48 @@
+name: Generate Service Status Badges
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # allows manual triggering from the Actions tab
+    inputs:
+      status_page_url:
+        description: 'URL of the status page to scrape'
+        required: false
+        default: 'https://status.ocrmd.com'
+
+jobs:
+  generate_badges:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write # (for committing the badges)
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install beautifulsoup4 playwright
+
+      - name: Install Playwright Browsers
+        run: |
+          playwright install --with-deps chromium
+
+      - name: Run Scraper and Generate Badges
+        env:
+          STATUS_PAGE_URL_TO_SCRAPE: ${{ github.event.inputs.status_page_url || 'https://status.ocrmd.com' }}
+        run: |
+          python scrape_status.py --status-url "$STATUS_PAGE_URL_TO_SCRAPE"
+
+      - name: Commit and Push Changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: " chore(status): Update service status badges"
+          file_pattern: "status_badges/*.svg"
