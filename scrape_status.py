@@ -157,7 +157,7 @@ async def scrape_status_page(url, executable_path=None):
             page = await browser.new_page()
             print(f"Navigating to {url}")
             await page.goto(url, wait_until='networkidle', timeout=60000)
-            service_selector = 'div[class*="MuiAccordion-root"]'
+            service_selector = 'div[role="button"][aria-expanded]'
             try:
                 await page.wait_for_selector(service_selector, state='visible', timeout=45000)
                 print("Service elements found.")
@@ -166,21 +166,52 @@ async def scrape_status_page(url, executable_path=None):
                 print("Attempting to scrape available content anyway.")
             html_content = await page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
-            accordion_items = soup.select(service_selector)
-            if not accordion_items:
-                 print(f"Warning: No accordion items found using selector '{service_selector}'.")
+            service_items = soup.select(service_selector)
+            if not service_items:
+                 print(f"Warning: No service items found using selector '{service_selector}'.")
                  return services
-            for item in accordion_items:
+            for item in service_items:
                 try:
-                    name_element = item.select_one('.MuiAccordionSummary-content div, .MuiAccordionSummary-content span[class*="MuiTypography"]')
-                    service_key_from_page = name_element.get_text(strip=True) if name_element else 'Unknown Service'
-                    status_element = item.select_one('.MuiAccordionSummary-content div:nth-child(2), .MuiAccordionSummary-content span')
+                    # Look for service name by finding the div that contains only the service name
+                    service_name_div = None
+                    for div in item.find_all('div'):
+                        text = div.get_text(strip=True)
+                        # Check if this div contains only a service name (not status text)
+                        if text and text.lower() not in ['healthy', 'operational', 'ok', 'degraded', 'outage', 'maintenance', 'investigating', 'monitoring', 'failed'] and len(text) < 50:
+                            # Make sure this div doesn't contain nested elements with status text
+                            nested_spans = div.find_all('span')
+                            has_status_text = False
+                            for span in nested_spans:
+                                span_text = span.get_text(strip=True).lower()
+                                if span_text in ['healthy', 'operational', 'ok', 'degraded', 'outage', 'maintenance', 'investigating', 'monitoring', 'failed']:
+                                    has_status_text = True
+                                    break
+                            if not has_status_text:
+                                service_name_div = div
+                                break
+                    
+                    service_key_from_page = service_name_div.get_text(strip=True) if service_name_div else 'Unknown Service'
+                    
+                    # Look for status in the span that contains "Healthy" or other status text
+                    status_element = item.select_one('span:-soup-contains("Healthy"), span:-soup-contains("Operational"), span:-soup-contains("OK"), span:-soup-contains("Degraded"), span:-soup-contains("Outage"), span:-soup-contains("Maintenance")')
+                    if not status_element:
+                        # Fallback: look for any span that might contain status
+                        status_spans = item.select('span')
+                        for span in status_spans:
+                            span_text = span.get_text(strip=True)
+                            if span_text and span_text.lower() in ['healthy', 'operational', 'ok', 'degraded', 'outage', 'maintenance', 'investigating', 'monitoring', 'failed']:
+                                status_element = span
+                                break
+                    
                     status_value = status_element.get_text(strip=True) if status_element else 'Unknown'
+                    
+                    # If still no status found, try to extract from the entire item text
                     if status_value == 'Unknown':
                          item_text = item.get_text()
                          status_matches = re.findall(r'(Operational|Healthy|OK|All Systems Operational|Degraded Performance|Partial Outage|Major Outage|Under Maintenance|Investigating|Monitoring|Failed)', item_text, re.IGNORECASE)
                          if status_matches:
                               status_value = status_matches[0]
+                    
                     if service_key_from_page and status_value and status_value.lower() not in ['unknown', 'unknown service']:
                         status_value = re.sub(r'\s+', ' ', status_value).strip()
                         if status_value.lower() == service_key_from_page.lower():
@@ -188,7 +219,7 @@ async def scrape_status_page(url, executable_path=None):
                              continue
                         services[service_key_from_page] = status_value
                 except Exception as e:
-                    print(f"Error processing an accordion item during parsing: {e}")
+                    print(f"Error processing a service item during parsing: {e}")
     except Exception as e:
         print(f"A critical error occurred during Playwright scraping of {url}: {e}")
         if not services:
